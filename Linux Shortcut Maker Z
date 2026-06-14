@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+import os
+import subprocess
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from pathlib import Path
+
+class LinuxShortcutMaker:
+    def __init__(self, root):
+        self.root = root
+        # NOME ATUALIZADO NA JANELA
+        self.root.title("Wine Linux Shortcut Maker Z")
+        self.root.geometry("500x500") 
+        self.root.eval('tk::PlaceWindow . center')
+        self.root.resizable(True, True) 
+        
+        # --- Paleta de Cores (Dark Mode) ---
+        self.bg_color = "#232429"      
+        self.fg_color = "#E0E0E0"      
+        self.sec_bg = "#2D2E33"        
+        self.btn_bg = "#3A3D45"        
+        self.btn_fg = "#FFFFFF"        
+        self.btn_accent = "#1976D2"    
+        self.color_gray = "#8E929B"    
+        self.color_green = "#81C995"   
+        self.color_red = "#F28B82"     
+        self.color_orange = "#F6BF26"  
+        self.color_blue = "#8AB4F8"    
+        
+        self.root.configure(bg=self.bg_color)
+        
+        # --- Dicionário de Traduções ---
+        self.lang = "en" 
+        self.texts = {
+            "en": {
+                "title": "Wine Linux Shortcut Maker Z", # NOME ATUALIZADO
+                "subtitle": "Create perfect shortcuts for Windows applications",
+                "step1": "1. Executable File (.exe):",
+                "no_file": "No file selected",
+                "browse": "Browse .exe",
+                "step2": "2. Shortcut Name (Customizable):",
+                "step3": "3. Program Icon:",
+                "default_icon": "Default Wine icon",
+                "change_icon": "Change Icon",
+                "btn_create": "🚀 Create Anti-Crash Shortcuts",
+                "credits": "Made by Ium101",
+                "lang_btn": "🇧🇷 Mudar para Português",
+                "err_step1": "Please select a .exe file in Step 1.",
+                "err_empty_name": "The shortcut name cannot be empty.",
+                "extracting": "Attempting to extract icon...",
+                "ext_success": "✅ Original icon extracted successfully!",
+                "ext_fail": "❌ Extraction failed. Using default.",
+                "custom_icon": "Custom: ",
+                "success_title": "Absolute Success!",
+                "success_msg": "The program '{0}' was configured!\n\n✓ Shortcut created with Anti-Crash protection (EBADF).\n✓ Added to Start Menu and Desktop.",
+                "err_title": "Error",
+                "err_msg": "A problem occurred while saving the shortcuts:\n{0}",
+                "ask_exe": "Select the .exe file",
+                "ask_icon": "Select an icon image"
+            },
+            "pt": {
+                "title": "Wine Linux Shortcut Maker Z", # NOME ATUALIZADO
+                "subtitle": "Crie atalhos perfeitos para aplicativos Windows",
+                "step1": "1. Arquivo Executável (.exe):",
+                "no_file": "Nenhum arquivo selecionado",
+                "browse": "Procurar .exe",
+                "step2": "2. Nome do Atalho (Personalizável):",
+                "step3": "3. Ícone do Programa:",
+                "default_icon": "Ícone padrão do Wine",
+                "change_icon": "Trocar Ícone",
+                "btn_create": "🚀 Criar Atalhos Anti-Crash",
+                "credits": "Feito por Ium101",
+                "lang_btn": "🇺🇸 Switch to English",
+                "err_step1": "Por favor, selecione um arquivo .exe no Passo 1.",
+                "err_empty_name": "O nome do atalho não pode ficar vazio.",
+                "extracting": "Tentando extrair ícone...",
+                "ext_success": "✅ Ícone original extraído com sucesso!",
+                "ext_fail": "❌ Falha ao extrair. Usando padrão.",
+                "custom_icon": "Personalizado: ",
+                "success_title": "Sucesso Absoluto!",
+                "success_msg": "O programa '{0}' foi configurado!\n\n✓ Atalho criado com proteção contra crash (EBADF).\n✓ Adicionado ao Menu Iniciar e Área de Trabalho.",
+                "err_title": "Erro",
+                "err_msg": "Ocorreu um problema ao salvar os atalhos:\n{0}",
+                "ask_exe": "Selecione o arquivo .exe",
+                "ask_icon": "Selecione uma imagem de ícone"
+            }
+        }
+        
+        self.caminho_exe = ""
+        self.caminho_icone = "wine"
+        self.status_icone = "default" 
+        
+        self.config_dir = Path.home() / ".config" / "linux_shortcut_maker"
+        self.config_file = self.config_dir / "last_path.txt"
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        
+        btn_style = {"bg": self.btn_bg, "fg": self.btn_fg, "activebackground": "#555963", "activeforeground": "white", "relief": "ridge", "bd": 1}
+        
+        self.lbl_credits = tk.Label(root, text=self.texts[self.lang]["credits"], fg=self.color_gray, bg=self.bg_color, font=("Arial", 8))
+        self.lbl_credits.pack(side="bottom", pady=10)
+
+        frame_top = tk.Frame(root, bg=self.bg_color)
+        frame_top.pack(fill="x", pady=10)
+        
+        self.btn_lang = tk.Button(frame_top, text=self.texts[self.lang]["lang_btn"], command=self.toggle_lang, 
+                                  bg=self.bg_color, fg=self.color_blue, activebackground=self.bg_color, 
+                                  activeforeground="white", relief="flat", cursor="hand2", font=("Arial", 9, "bold"))
+        self.btn_lang.pack(anchor="center")
+        
+        self.lbl_title = tk.Label(root, text=self.texts[self.lang]["title"], font=("Arial", 14, "bold"), bg=self.bg_color, fg="white")
+        self.lbl_title.pack(pady=(0, 5))
+        self.lbl_subtitle = tk.Label(root, text=self.texts[self.lang]["subtitle"], bg=self.bg_color, fg=self.color_gray)
+        self.lbl_subtitle.pack(pady=(0, 15))
+        
+        self.lbl_step1 = tk.Label(root, text=self.texts[self.lang]["step1"], font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
+        self.lbl_step1.pack(anchor="w", padx=20)
+        
+        frame_exe = tk.Frame(root, bg=self.bg_color)
+        frame_exe.pack(fill="x", padx=20, pady=5)
+        
+        self.lbl_exe = tk.Label(frame_exe, text=self.texts[self.lang]["no_file"], fg=self.color_gray, bg=self.bg_color, wraplength=350, justify="left")
+        self.lbl_exe.pack(side="left", expand=True, fill="x")
+        self.btn_browse = tk.Button(frame_exe, text=self.texts[self.lang]["browse"], command=self.selecionar_exe, **btn_style)
+        self.btn_browse.pack(side="right")
+        
+        self.lbl_step2 = tk.Label(root, text=self.texts[self.lang]["step2"], font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
+        self.lbl_step2.pack(anchor="w", padx=20, pady=(15, 0))
+        
+        self.entry_nome = tk.Entry(root, font=("Arial", 11), bg=self.sec_bg, fg="white", insertbackground="white", relief="flat")
+        self.entry_nome.pack(fill="x", padx=20, pady=5)
+        
+        self.lbl_step3 = tk.Label(root, text=self.texts[self.lang]["step3"], font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
+        self.lbl_step3.pack(anchor="w", padx=20, pady=(15, 0))
+        
+        frame_icone = tk.Frame(root, bg=self.bg_color)
+        frame_icone.pack(fill="x", padx=20, pady=5)
+        
+        self.lbl_icone = tk.Label(frame_icone, text=self.texts[self.lang]["default_icon"], fg=self.color_gray, bg=self.bg_color, wraplength=350, justify="left")
+        self.lbl_icone.pack(side="left", expand=True, fill="x")
+        self.btn_icon = tk.Button(frame_icone, text=self.texts[self.lang]["change_icon"], command=self.selecionar_icone_manual, **btn_style)
+        self.btn_icon.pack(side="right")
+        
+        self.btn_create = tk.Button(root, text=self.texts[self.lang]["btn_create"], command=self.criar_atalho, 
+                                    font=("Arial", 11, "bold"), pady=8, bg=self.btn_accent, fg="white", 
+                                    activebackground="#1565C0", activeforeground="white", relief="flat")
+        self.btn_create.pack(pady=20)
+
+    def toggle_lang(self):
+        self.lang = "pt" if self.lang == "en" else "en"
+        t = self.texts[self.lang]
+        
+        self.btn_lang.config(text=t["lang_btn"])
+        self.lbl_title.config(text=t["title"])
+        self.lbl_subtitle.config(text=t["subtitle"])
+        self.lbl_step1.config(text=t["step1"])
+        self.btn_browse.config(text=t["browse"])
+        self.lbl_step2.config(text=t["step2"])
+        self.lbl_step3.config(text=t["step3"])
+        self.btn_icon.config(text=t["change_icon"])
+        self.btn_create.config(text=t["btn_create"])
+        self.lbl_credits.config(text=t["credits"])
+        
+        if not self.caminho_exe:
+            self.lbl_exe.config(text=t["no_file"])
+            
+        if self.status_icone == "default":
+            self.lbl_icone.config(text=t["default_icon"])
+        elif self.status_icone == "success":
+            self.lbl_icone.config(text=t["ext_success"])
+        elif self.status_icone == "fail":
+            self.lbl_icone.config(text=t["ext_fail"])
+        elif self.status_icone == "custom":
+            self.lbl_icone.config(text=f"{t['custom_icon']}{os.path.basename(self.caminho_icone)}")
+
+    def get_last_path(self):
+        if self.config_file.exists():
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                path = f.read().strip()
+                if os.path.isdir(path):
+                    return path
+        default_start = Path("/mnt")
+        return str(default_start) if default_start.exists() else str(Path.home())
+
+    def save_last_path(self, path):
+        with open(self.config_file, 'w', encoding='utf-8') as f:
+            f.write(path)
+
+    def selecionar_exe(self):
+        caminho = filedialog.askopenfilename(
+            title=self.texts[self.lang]["ask_exe"], 
+            initialdir=self.get_last_path(),
+            filetypes=[("Executables", "*.exe")]
+        )
+        if caminho:
+            self.caminho_exe = caminho
+            self.save_last_path(os.path.dirname(caminho)) 
+            self.lbl_exe.config(text=os.path.basename(caminho), fg=self.fg_color)
+            
+            nome_base = os.path.splitext(os.path.basename(caminho))[0].replace("_", " ").title()
+            self.entry_nome.delete(0, tk.END)
+            self.entry_nome.insert(0, nome_base)
+            
+            self.extrair_icone_automatico()
+            
+    def extrair_icone_automatico(self):
+        self.lbl_icone.config(text=self.texts[self.lang]["extracting"], fg=self.color_orange)
+        self.root.update()
+        
+        pasta_icones = Path.home() / ".local" / "share" / "icons" / "linux_shortcut_maker"
+        pasta_icones.mkdir(parents=True, exist_ok=True)
+        
+        nome_limpo = "".join(x for x in self.entry_nome.get() if x.isalnum()) or "icone"
+        caminho_saida = pasta_icones / f"{nome_limpo}.ico"
+        
+        comando = f'wrestool -x -t 14 "{self.caminho_exe}" > "{caminho_saida}"'
+        resultado = subprocess.run(comando, shell=True, stderr=subprocess.DEVNULL)
+        
+        if resultado.returncode == 0 and caminho_saida.exists() and caminho_saida.stat().st_size > 0:
+            self.caminho_icone = str(caminho_saida)
+            self.status_icone = "success"
+            self.lbl_icone.config(text=self.texts[self.lang]["ext_success"], fg=self.color_green)
+        else:
+            self.caminho_icone = "wine"
+            self.status_icone = "fail"
+            self.lbl_icone.config(text=self.texts[self.lang]["ext_fail"], fg=self.color_red)
+            if caminho_saida.exists(): 
+                caminho_saida.unlink()
+                
+    def selecionar_icone_manual(self):
+        caminho = filedialog.askopenfilename(
+            title=self.texts[self.lang]["ask_icon"], 
+            filetypes=[("Images", "*.png *.ico *.svg *.jpg")]
+        )
+        if caminho:
+            self.caminho_icone = caminho
+            self.status_icone = "custom"
+            self.lbl_icone.config(text=f"{self.texts[self.lang]['custom_icon']}{os.path.basename(caminho)}", fg=self.color_blue)
+            
+    def criar_atalho(self):
+        t = self.texts[self.lang]
+        
+        if not self.caminho_exe:
+            messagebox.showwarning("Atenção / Warning", t["err_step1"])
+            return
+            
+        nome_atalho = self.entry_nome.get().strip()
+        if not nome_atalho:
+            messagebox.showwarning("Atenção / Warning", t["err_empty_name"])
+            return
+            
+        pasta_trabalho = os.path.dirname(self.caminho_exe)
+        pasta_desktop = self.obter_area_de_trabalho()
+        pasta_menu = Path.home() / ".local" / "share" / "applications"
+        
+        nome_arquivo_seguro = "".join(x for x in nome_atalho if x.isalnum() or x in " -_").strip().replace(" ", "_").lower()
+        arquivo_desktop = pasta_desktop / f"{nome_arquivo_seguro}.desktop"
+        arquivo_menu = pasta_menu / f"wine_{nome_arquivo_seguro}.desktop"
+        
+        exec_comando = f'sh -c "wine \\"{self.caminho_exe}\\" > /dev/null 2>&1"'
+        
+        conteudo_desktop = f"""[Desktop Entry]
+Name={nome_atalho}
+Type=Application
+Exec={exec_comando}
+Path={pasta_trabalho}
+Icon={self.caminho_icone}
+Terminal=false
+Categories=Wine;Application;
+"""
+        try:
+            with open(arquivo_desktop, 'w', encoding='utf-8') as f:
+                f.write(conteudo_desktop)
+            os.chmod(arquivo_desktop, 0o755)
+            
+            with open(arquivo_menu, 'w', encoding='utf-8') as f:
+                f.write(conteudo_desktop)
+            os.chmod(arquivo_menu, 0o755)
+            
+            subprocess.run(['update-desktop-database', str(pasta_menu)], stderr=subprocess.DEVNULL)
+            
+            messagebox.showinfo(
+                t["success_title"], 
+                t["success_msg"].format(nome_atalho)
+            )
+            
+        except Exception as e:
+            messagebox.showerror(t["err_title"], t["err_msg"].format(e))
+
+    def obter_area_de_trabalho(self):
+        try:
+            res = subprocess.run(['xdg-user-dir', 'DESKTOP'], stdout=subprocess.PIPE, text=True)
+            return Path(res.stdout.strip())
+        except:
+            return Path.home() / "Desktop"
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = LinuxShortcutMaker(root)
+    root.mainloop()
