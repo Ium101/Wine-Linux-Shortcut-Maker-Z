@@ -1,28 +1,34 @@
 # Linux Shortcut Maker Z 🚀
 
-O **Linux Shortcut Maker Z** é uma ferramenta de interface gráfica (GUI) simples e leve, desenvolvida em Python (Tkinter), projetada especificamente para usuários de Linux (como BigLinux, Ubuntu, Fedora, etc.) que utilizam o **Wine** para rodar aplicativos e jogos do Windows (`.exe`).
+🌍 **English Version** | 🇧🇷 **Versão em Português**
 
-## 📋 O Problema que ele resolve
+---
 
-Criar links simbólicos diretamente para um arquivo `.exe` na Área de Trabalho do Linux costuma quebrar o programa. Isso ocorre porque o Wine exige que a **Pasta de Trabalho** (*Working Directory*) seja exatamente a pasta onde o executável original e suas respectivas `.dll` estão contidos. Se você rodar apenas o link, o aplicativo tenta carregar na Área de Trabalho e falha.
+## 🌍 English Version
 
-**A Solução Z:** Este programa automatiza a criação de um lançador `.desktop` nativo do Linux. Você só precisa selecionar o arquivo `.exe` e o programa deduz a pasta de trabalho, monta o comando correto do Wine, aplica as permissões de execução (`chmod +x`) e envia o atalho pronto para a sua Área de Trabalho com apenas um clique.
+**Linux Shortcut Maker Z** is a simple and lightweight graphical user interface (GUI) tool developed in Python (Tkinter), specifically designed for Linux users (such as BigLinux, Ubuntu, Fedora, etc.) who use **Wine** to run Windows applications and games (`.exe`).
 
-## ✨ Funcionalidades
+### 📋 The Problem it Solves
 
-- 🗔 **Interface Gráfica Intuitiva:** Sem necessidade de usar o terminal para criar atalhos.
-- 📂 **Detecção Automática de Caminho:** Identifica a pasta raiz do arquivo `.exe` instantaneamente.
-- 💻 **Instalador Inteligente (`build.sh`):** Compila o programa na pasta local e cria um atalho nativo diretamente no seu Menu Iniciar do sistema.
-- 🛠️ **Independente de Case-Sensitivity:** O script de build reconhece o código tanto em maiúsculo quanto em minúsculo.
+Creating symbolic links directly to an `.exe` file on the Linux Desktop usually breaks the program. This happens because Wine requires the **Working Directory** to be exactly the folder where the original executable and its respective `.dll` files are located. If you run just the link, the application tries to load on the Desktop and fails.
 
-## 🛠️ Pré-requisitos
+**The Z Solution:** This program automates the creation of a native Linux `.desktop` launcher. You only need to select the `.exe` file, and the program deduces the working directory, assembles the correct Wine command, applies execution permissions (`chmod +x`), and sends the ready-made shortcut to your Desktop with just one click.
 
-O programa utiliza dependências nativas que geralmente já vêm instaladas no BigLinux e em outras distribuições com KDE Plasma:
+### ✨ Features
+
+*   🗔 **Intuitive Graphical Interface:** No need to use the terminal to create shortcuts.
+*   📂 **Automatic Path Detection:** Instantly identifies the root folder of the `.exe` file.
+*   💻 **Smart Installer (`build.sh`):** Compiles the program in the local folder and creates a native shortcut directly in your system's Start Menu.
+*   🛠️ **Case-Insensitive:** The build script recognizes code in both uppercase and lowercase.
+
+### 🛠️ Prerequisites
+
+The program uses native dependencies that usually come pre-installed in BigLinux and other distributions with KDE Plasma:
 
 ```bash
-# Python 3 e Tkinter (Interface Gráfica)
-# No BigLinux/Manjaro/Arch:
+# Python 3 and Tkinter (Graphical Interface)[cite: 1]
+# On BigLinux/Manjaro/Arch[cite: 1]:
 sudo pacman -S python python-tkinter
 
-# No Ubuntu/Debian/Mint:
+# On Ubuntu/Debian/Mint[cite: 1]:
 sudo apt install python3 python3-tk
