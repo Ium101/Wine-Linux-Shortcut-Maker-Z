@@ -44,12 +44,12 @@ cp "./$LOCAL_OUTPUT_NAME" "$BIN_DIR/$EXEC_NAME"
 
 DESKTOP_ENTRY_CONTENT="[Desktop Entry]
 Name=Wine Linux Shortcut Maker Z
-Comment=Gera atalhos configurados
+Comment=Generate shortcuts for Windows programs in Linux
 Exec=$BIN_DIR/$EXEC_NAME
 Icon=$ICON_SETTING
 Terminal=false
 Type=Application
-Categories=Utility;Wine;System;
+Categories=Utility;Wine;
 "
 
 echo "$DESKTOP_ENTRY_CONTENT" > "$APP_DIR/$EXEC_NAME.desktop"
