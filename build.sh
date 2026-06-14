@@ -49,7 +49,7 @@ Exec=$BIN_DIR/$EXEC_NAME
 Icon=$ICON_SETTING
 Terminal=false
 Type=Application
-Categories=Wine;Utility;System;
+Categories=Utility;Wine;System;
 "
 
 echo "$DESKTOP_ENTRY_CONTENT" > "$APP_DIR/$EXEC_NAME.desktop"
