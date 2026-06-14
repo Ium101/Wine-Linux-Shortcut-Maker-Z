@@ -90,7 +90,8 @@ class LinuxShortcutMaker:
         self.caminho_icone = "wine"
         self.status_icone = "default" 
         
-        self.config_dir = Path.home() / ".config" / "linux_shortcut_maker"
+        # PATH FIX: Updated to wine_linux_shortcut_maker
+        self.config_dir = Path.home() / ".config" / "wine_linux_shortcut_maker"
         self.config_file = self.config_dir / "last_path.txt"
         self.config_dir.mkdir(parents=True, exist_ok=True)
         
@@ -206,7 +207,8 @@ class LinuxShortcutMaker:
         self.lbl_icone.config(text=self.texts[self.lang]["extracting"], fg=self.color_orange)
         self.root.update()
         
-        pasta_icones = Path.home() / ".local" / "share" / "icons" / "linux_shortcut_maker"
+        # PATH FIX: Updated to wine_linux_shortcut_maker
+        pasta_icones = Path.home() / ".local" / "share" / "icons" / "wine_linux_shortcut_maker"
         pasta_icones.mkdir(parents=True, exist_ok=True)
         
         nome_limpo = "".join(x for x in self.entry_nome.get() if x.isalnum()) or "icone"

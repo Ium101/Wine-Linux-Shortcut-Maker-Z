@@ -1,23 +1,24 @@
 #!/bin/bash
 
 # Define binary and path variables
-EXEC_NAME="linux-shortcut-maker-z"
+EXEC_NAME="wine-linux-shortcut-maker-z"
+LOCAL_OUTPUT_NAME="Wine Linux Shortcut Maker Z"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 
 # Use the python script logic to find the localized Desktop path robustly
 DESKTOP_DIR=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")
 
-echo "⚙️ Iniciando a construção do Linux Shortcut Maker Z..."
+echo "⚙️ Iniciando a construção do Wine Linux Shortcut Maker Z..."
 
-# 1. Busca inteligente pelo script Python
-if [ -f "Linux_Shortcut_Maker_Z.py" ]; then
-    SCRIPT_NAME="Linux_Shortcut_Maker_Z.py"
-elif [ -f "linux_shortcut_maker_z.py" ]; then
-    SCRIPT_NAME="linux_shortcut_maker_z.py"
+# 1. Busca inteligente pelo script Python (Updated logic for new name)
+if [ -f "Wine_Linux_Shortcut_Maker_Z.py" ]; then
+    SCRIPT_NAME="Wine_Linux_Shortcut_Maker_Z.py"
+elif [ -f "wine_linux_shortcut_maker_z.py" ]; then
+    SCRIPT_NAME="wine_linux_shortcut_maker_z.py"
 else
     echo "❌ Erro: O arquivo do script Python não foi encontrado nesta pasta."
-    echo "Certifique-se de que o arquivo se chama 'Linux_Shortcut_Maker_Z.py' ou 'linux_shortcut_maker_z.py'."
+    echo "Certifique-se de que o arquivo se chama 'Wine_Linux_Shortcut_Maker_Z.py' ou 'wine_linux_shortcut_maker_z.py'."
     exit 1
 fi
 
@@ -28,17 +29,17 @@ mkdir -p "$DESKTOP_DIR"
 
 # 3. GERA O PROGRAMA NA MESMA PASTA ATUAL (Local)
 echo "📦 Gerando o executável na pasta atual..."
-echo '#!/usr/bin/env python3' > "./$EXEC_NAME"
-cat "$SCRIPT_NAME" >> "./$EXEC_NAME"
-chmod +x "./$EXEC_NAME"
+echo '#!/usr/bin/env python3' > "./$LOCAL_OUTPUT_NAME"
+cat "$SCRIPT_NAME" >> "./$LOCAL_OUTPUT_NAME"
+chmod +x "./$LOCAL_OUTPUT_NAME"
 
 # 4. Copia o executável para a pasta de binários do sistema do usuário
 echo "🚀 Instalando uma cópia no sistema (~/.local/bin)..."
-cp "./$EXEC_NAME" "$BIN_DIR/$EXEC_NAME"
+cp "./$LOCAL_OUTPUT_NAME" "$BIN_DIR/$EXEC_NAME"
 
-# 5. Define the content for the .desktop shortcut
+# 5. Define the content for the .desktop shortcut (Updated to new App Name)
 DESKTOP_ENTRY_CONTENT="[Desktop Entry]
-Name=Linux Shortcut Maker Z
+Name=Wine Linux Shortcut Maker Z
 Comment=Gera atalhos configurados para programas .exe no Wine automaticamente
 Exec=$BIN_DIR/$EXEC_NAME
 Icon=wine
@@ -64,7 +65,7 @@ fi
 
 echo "======================================================="
 echo "✅ Processo concluído com sucesso!"
-echo "-> Executável criado na pasta atual: ./$EXEC_NAME"
+echo "-> Executável criado na pasta atual: ./$LOCAL_OUTPUT_NAME"
 echo "-> Instalado no Menu Iniciar (Categoria: Wine)"
 echo "-> Atalho criado na Área de Trabalho"
 echo "======================================================="
