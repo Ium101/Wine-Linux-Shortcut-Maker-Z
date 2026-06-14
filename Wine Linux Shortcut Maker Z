@@ -14,6 +14,16 @@ class LinuxShortcutMaker:
         self.root.eval('tk::PlaceWindow . center')
         self.root.resizable(True, True) 
         
+        # --- NEW: Carregar Ícone Customizado na Janela ---
+        try:
+            # Aponta para o diretório de ícones onde o instalador copiou a imagem .png
+            caminho_icone_janela = Path.home() / ".local" / "share" / "icons" / "wine-linux-shortcut-maker-z.png"
+            if caminho_icone_janela.exists():
+                icone_img = tk.PhotoImage(file=str(caminho_icone_janela))
+                self.root.iconphoto(True, icone_img)
+        except Exception:
+            pass # Falha silenciosamente se o Tkinter não achar um .png
+            
         # --- Paleta de Cores (Dark Mode) ---
         self.bg_color = "#232429"      
         self.fg_color = "#E0E0E0"      
