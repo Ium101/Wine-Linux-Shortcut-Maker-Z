@@ -1,7 +1,7 @@
 import os
 import subprocess
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 
 class LinuxShortcutMaker:
@@ -457,9 +457,9 @@ class LinuxShortcutMaker:
     def selecionar_exe(self):
         t = self.texts[self.lang]
 
-        # Neutral dialog — no type pre-filtering; detection happens after selection
-        caminho = filedialog.askopenfilename(
-            title="Select executable",
+        # Use the modern embedded file picker instead of the old native dialog
+        caminho = self.modern_file_picker(
+            title=t.get("ask_exe", "Select executable"),
             initialdir=self.get_last_path(),
             filetypes=[
                 ("All files", "*"),
@@ -562,8 +562,9 @@ class LinuxShortcutMaker:
 
     # ── Manual icon picker ────────────────────────────────────────────────────
     def selecionar_icone_manual(self):
-        caminho = filedialog.askopenfilename(
+        caminho = self.modern_file_picker(
             title=self.texts[self.lang]["ask_icon"],
+            initialdir=self.get_last_path(),
             filetypes=[("Images", "*.png *.ico *.svg *.jpg *.xpm")]
         )
         if caminho:
@@ -573,6 +574,86 @@ class LinuxShortcutMaker:
                 text=f"{self.texts[self.lang]['custom_icon']}{os.path.basename(caminho)}",
                 fg=self.color_blue
             )
+
+    # ── Modern embedded file picker ─────────────────────────────────────────
+    def modern_file_picker(self, title="Select file", initialdir=None, filetypes=None):
+        """Use native system file picker (zenity/kdialog) for modern UI.
+        
+        Falls back to tkinter's filedialog if system tools unavailable.
+        Returns the selected filepath string or empty string on cancel.
+        """
+        initialdir = initialdir or str(Path.home())
+        filetypes = filetypes or [("All files", "*")]
+
+        # Try zenity (GNOME) first
+        result = self._try_zenity_picker(title, initialdir, filetypes)
+        if result is not None:  # Either success or user cancelled
+            return result
+        
+        # Try kdialog (KDE)
+        result = self._try_kdialog_picker(title, initialdir, filetypes)
+        if result is not None:  # Either success or user cancelled
+            return result
+        
+        # Fallback to tkinter's native file dialog only if no system tools available
+        return filedialog.askopenfilename(
+            title=title,
+            initialdir=initialdir,
+            filetypes=filetypes
+        )
+
+    def _try_zenity_picker(self, title, initialdir, filetypes):
+        """Try to use zenity (GNOME file picker).
+        
+        Returns: filepath string if successful, "" if cancelled, None if unavailable
+        """
+        try:
+            if subprocess.run(["which", "zenity"], capture_output=True).returncode != 0:
+                return None
+            
+            # Build file type filters for zenity
+            filters = []
+            for label, pattern in filetypes:
+                patterns = pattern.split()
+                filter_str = " ".join(patterns)
+                filters.extend(["--file-filter", f"{label} | {filter_str}"])
+            
+            cmd = ["zenity", "--file-selection", "--title", title, 
+                   "--filename", str(initialdir) + "/"] + filters
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                return result.stdout.strip()  # File selected
+            else:
+                return ""  # User cancelled
+        except Exception:
+            return None  # Tool unavailable
+
+    def _try_kdialog_picker(self, title, initialdir, filetypes):
+        """Try to use kdialog (KDE file picker).
+        
+        Returns: filepath string if successful, "" if cancelled, None if unavailable
+        """
+        try:
+            if subprocess.run(["which", "kdialog"], capture_output=True).returncode != 0:
+                return None
+            
+            # Build file type filters for kdialog
+            filters = ""
+            for label, pattern in filetypes:
+                patterns = pattern.split()
+                filter_str = " ".join(patterns)
+                filters += f"{label} ({filter_str}) "
+            
+            cmd = ["kdialog", "--getopenfilename", str(initialdir), filters, "--title", title]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                return result.stdout.strip()  # File selected
+            else:
+                return ""  # User cancelled
+        except Exception:
+            return None  # Tool unavailable
 
     # ── Category dropdown callback ────────────────────────────────────────────
     def _on_cat_change(self, selected_label):
