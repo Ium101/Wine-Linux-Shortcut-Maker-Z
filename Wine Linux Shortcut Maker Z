@@ -1,15 +1,56 @@
 #!/usr/bin/env python3
 import os
+import sys
+import configparser
 import subprocess
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 
+# ── Theme palettes ────────────────────────────────────────────────────────────
+THEMES = {
+    "dark": {
+        "bg":        "#232429",
+        "fg":        "#E0E0E0",
+        "sec_bg":    "#2D2E33",
+        "btn_bg":    "#3A3D45",
+        "btn_fg":    "#FFFFFF",
+        "accent":    "#1976D2",
+        "accent_hl": "#1565C0",
+        "gray":      "#8E929B",
+        "green":     "#81C995",
+        "red":       "#F28B82",
+        "orange":    "#F6BF26",
+        "blue":      "#8AB4F8",
+        "purple":    "#CF9FFF",
+        "active_bg": "#555963",
+        "theme_icon":"☀️",
+    },
+    "light": {
+        "bg":        "#F2F2F7",
+        "fg":        "#1C1C1E",
+        "sec_bg":    "#E5E5EA",
+        "btn_bg":    "#D1D1D6",
+        "btn_fg":    "#1C1C1E",
+        "accent":    "#1565C0",
+        "accent_hl": "#0D47A1",
+        "gray":      "#636366",
+        "green":     "#2E7D32",
+        "red":       "#C62828",
+        "orange":    "#E65100",
+        "blue":      "#1565C0",
+        "purple":    "#6A1B9A",
+        "active_bg": "#C7C7CC",
+        "theme_icon":"🌙",
+    },
+}
+
+
 class LinuxShortcutMaker:
     def __init__(self, root):
         self.root = root
         self.root.title("Wine Linux Shortcut Maker Z")
-        self.root.minsize(480, 0)           # min width; height grows with content
+        self.root.minsize(480, 0)
         self.root.eval('tk::PlaceWindow . center')
         self.root.resizable(True, True)
 
@@ -22,27 +63,21 @@ class LinuxShortcutMaker:
         except Exception:
             pass
 
-        # --- Color palette (Dark Mode) ---
-        self.bg_color    = "#232429"
-        self.fg_color    = "#E0E0E0"
-        self.sec_bg      = "#2D2E33"
-        self.btn_bg      = "#3A3D45"
-        self.btn_fg      = "#FFFFFF"
-        self.btn_accent  = "#1976D2"
-        self.color_gray  = "#8E929B"
-        self.color_green = "#81C995"
-        self.color_red   = "#F28B82"
-        self.color_orange= "#F6BF26"
-        self.color_blue  = "#8AB4F8"
-        self.color_purple= "#CF9FFF"
+        # --- Persistent config paths (must come before _apply_palette) ---
+        self.config_dir  = Path(__file__).resolve().parent
+        self.config_file = self.config_dir / "config_sh.ini"
 
+        # --- Load saved settings (theme + language + last path) ---
+        settings = self._load_settings()
+        self.current_theme = settings.get("theme", "dark")
+        self._apply_palette()
         self.root.configure(bg=self.bg_color)
 
-        # --- Executable type: "wine" (.exe via Wine) or "native" (Linux binary) ---
+        # --- Executable type ---
         self.exe_type = tk.StringVar(value="wine")
 
         # --- Translation dictionary ---
-        self.lang = "en"
+        self.lang = settings.get("language", "en")
         self.texts = {
             "en": {
                 "title": "Wine Linux Shortcut Maker Z",
@@ -147,118 +182,291 @@ class LinuxShortcutMaker:
         self.caminho_exe   = ""
         self.caminho_icone = "wine"
         self.status_icone  = "default"
-        self.category      = tk.StringVar(value="Utility")  # XDG desktop category key
+        self.category      = tk.StringVar(value=settings.get("category", "Utility"))
 
-        self.config_dir  = Path.home() / ".config" / "wine_linux_shortcut_maker"
-        self.config_file = self.config_dir / "last_path.txt"
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self._build_ui()
+
+    # ── Theme helpers ─────────────────────────────────────────────────────────
+    def _apply_palette(self):
+        """Copy the active theme's colours into convenient self.* attributes."""
+        p = THEMES[self.current_theme]
+        self.bg_color    = p["bg"]
+        self.fg_color    = p["fg"]
+        self.sec_bg      = p["sec_bg"]
+        self.btn_bg      = p["btn_bg"]
+        self.btn_fg      = p["btn_fg"]
+        self.btn_accent  = p["accent"]
+        self.color_gray  = p["gray"]
+        self.color_green = p["green"]
+        self.color_red   = p["red"]
+        self.color_orange= p["orange"]
+        self.color_blue  = p["blue"]
+        self.color_purple= p["purple"]
+
+    # XDG category keys are language-independent (only display labels are translated)
+    VALID_CATEGORIES = {"Utility", "Development", "Office", "Graphics", "Network", "Game", "AudioVideo", "System", "WebApps"}
+
+    def _load_settings(self):
+        """Load saved settings (theme + language + last browsed path + category) from config_sh.ini."""
+        defaults = {"theme": "dark", "language": "en", "last_path": "", "category": "Utility"}
+        try:
+            if self.config_file.exists():
+                parser = configparser.ConfigParser()
+                parser.read(self.config_file, encoding="utf-8")
+                section = parser["settings"] if parser.has_section("settings") else {}
+                theme = section.get("theme", defaults["theme"])
+                language = section.get("language", defaults["language"])
+                last_path = section.get("last_path", defaults["last_path"])
+                category = section.get("category", defaults["category"])
+                if theme not in THEMES:
+                    theme = defaults["theme"]
+                if language not in ("en", "pt"):
+                    language = defaults["language"]
+                if category not in self.VALID_CATEGORIES:
+                    category = defaults["category"]
+                return {"theme": theme, "language": language, "last_path": last_path, "category": category}
+        except Exception:
+            pass
+        return defaults
+
+    def _save_settings(self, **updates):
+        """Persist current theme + language + last path + category to config_sh.ini.
+
+        Any provided keyword overrides the corresponding in-memory value
+        before saving (used for last_path/category, which aren't always
+        in sync with self at call time).
+        """
+        try:
+            current = self._load_settings()
+            current["theme"] = self.current_theme
+            current["language"] = self.lang
+            current["category"] = self.category.get()
+            current.update(updates)
+            parser = configparser.ConfigParser()
+            parser["settings"] = current
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                parser.write(f)
+        except Exception:
+            pass
+
+    def toggle_theme(self):
+        self.current_theme = "light" if self.current_theme == "dark" else "dark"
+        self._apply_palette()
+        self._save_settings()
+        self._repaint_ui()
+
+    def _repaint_ui(self):
+        """Recolour every widget to match the new theme without rebuilding the UI."""
+        p = THEMES[self.current_theme]
+
+        # Root
+        self.root.configure(bg=self.bg_color)
+
+        # Top bar
+        self.frame_top.configure(bg=self.bg_color)
+        self.frame_controls.configure(bg=self.bg_color)
+        self.btn_lang.config(
+            bg=self.bg_color, fg=self.color_blue,
+            activebackground=self.bg_color, activeforeground="white",
+        )
+        self.btn_theme.config(
+            bg=self.bg_color, fg=self.color_orange,
+            activebackground=self.bg_color, activeforeground="white",
+            text=p["theme_icon"],
+        )
+
+        # Title / subtitle
+        self.lbl_title.config(bg=self.bg_color, fg=self.fg_color)
+        self.lbl_subtitle.config(bg=self.bg_color, fg=self.color_gray)
+
+        # Executable type selector
+        self.frame_type.configure(bg=self.bg_color)
+        self.lbl_type.config(bg=self.bg_color, fg=self.fg_color)
+        rb_cfg = dict(
+            bg=self.bg_color, fg=self.fg_color,
+            activebackground=self.bg_color, activeforeground=self.fg_color,
+            selectcolor=self.sec_bg,
+        )
+        self.rb_wine.config(**rb_cfg)
+        self.rb_native.config(**rb_cfg)
+
+        # Step 1 – exe
+        self.lbl_step1.config(bg=self.bg_color)        # fg is dynamic; don't touch it
+        self.frame_exe.configure(bg=self.bg_color)
+        self.lbl_exe.config(bg=self.bg_color)          # fg is dynamic; don't touch it
+        self.btn_browse.config(
+            bg=self.btn_bg, fg=self.btn_fg,
+            activebackground=p["active_bg"], activeforeground=self.btn_fg,
+        )
+
+        # Step 2 – name entry
+        self.lbl_step2.config(bg=self.bg_color, fg=self.fg_color)
+        self.entry_nome.config(
+            bg=self.sec_bg, fg=self.fg_color, insertbackground=self.fg_color,
+        )
+
+        # Step 3 – icon
+        self.lbl_step3.config(bg=self.bg_color, fg=self.fg_color)
+        self.frame_icone.configure(bg=self.bg_color)
+        self.lbl_icone.config(bg=self.bg_color)        # fg is dynamic; don't touch it
+        self.btn_icon.config(
+            bg=self.btn_bg, fg=self.btn_fg,
+            activebackground=p["active_bg"], activeforeground=self.btn_fg,
+        )
+
+        # Step 4 – extra args
+        self.lbl_args.config(bg=self.bg_color, fg=self.fg_color)
+        args_fg = self.color_gray if self._args_placeholder_active else self.fg_color
+        self.entry_args.config(
+            bg=self.sec_bg, fg=args_fg, insertbackground=self.fg_color,
+        )
+
+        # Step 5 – category dropdown
+        self.lbl_cat.config(bg=self.bg_color, fg=self.fg_color)
+        self.frame_cat.configure(bg=self.bg_color)
+        self.opt_cat.config(
+            bg=self.btn_bg, fg=self.btn_fg,
+            activebackground=p["active_bg"], activeforeground=self.btn_fg,
+        )
+        self.opt_cat["menu"].config(
+            bg=self.btn_bg, fg=self.btn_fg,
+            activebackground=self.btn_accent, activeforeground="white",
+        )
+
+        # Create button
+        self.btn_create.config(
+            bg=self.btn_accent, fg="white",
+            activebackground=p["accent_hl"], activeforeground="white",
+        )
+
+        # Credits
+        self.lbl_credits.config(bg=self.bg_color, fg=self.color_gray)
+
+    # ── UI construction ───────────────────────────────────────────────────────
+    def _build_ui(self):
+        p = THEMES[self.current_theme]
 
         btn_style = {
             "bg": self.btn_bg, "fg": self.btn_fg,
-            "activebackground": "#555963", "activeforeground": "white",
-            "relief": "ridge", "bd": 1
+            "activebackground": p["active_bg"], "activeforeground": self.btn_fg,
+            "relief": "ridge", "bd": 1,
         }
 
         # ── Credits (bottom) ─────────────────────────────────────────────────
-        self.lbl_credits = tk.Label(root, text=self.texts[self.lang]["credits"],
+        self.lbl_credits = tk.Label(self.root, text=self.texts[self.lang]["credits"],
                                     fg=self.color_gray, bg=self.bg_color, font=("Arial", 8))
         self.lbl_credits.pack(side="bottom", pady=10)
 
-        # ── Language button ───────────────────────────────────────────────────
-        frame_top = tk.Frame(root, bg=self.bg_color)
-        frame_top.pack(fill="x", pady=10)
-        self.btn_lang = tk.Button(frame_top, text=self.texts[self.lang]["lang_btn"],
-                                  command=self.toggle_lang,
-                                  bg=self.bg_color, fg=self.color_blue,
-                                  activebackground=self.bg_color, activeforeground="white",
-                                  relief="flat", cursor="hand2", font=("Arial", 9, "bold"))
-        self.btn_lang.pack(anchor="center")
+        # ── Top bar: language toggle + theme toggle ───────────────────────────
+        self.frame_top = tk.Frame(self.root, bg=self.bg_color)
+        self.frame_top.pack(fill="x", pady=10)
+
+        self.frame_controls = tk.Frame(self.frame_top, bg=self.bg_color)
+        self.frame_controls.pack(anchor="center")
+
+        self.btn_lang = tk.Button(
+            self.frame_controls, text=self.texts[self.lang]["lang_btn"],
+            command=self.toggle_lang,
+            bg=self.bg_color, fg=self.color_blue,
+            activebackground=self.bg_color, activeforeground="white",
+            relief="flat", cursor="hand2", font=("Arial", 9, "bold"),
+        )
+        self.btn_lang.pack(side="left", padx=(0, 10))
+
+        self.btn_theme = tk.Button(
+            self.frame_controls, text=p["theme_icon"],
+            command=self.toggle_theme,
+            bg=self.bg_color, fg=self.color_orange,
+            activebackground=self.bg_color, activeforeground="white",
+            relief="flat", cursor="hand2", font=("Arial", 11),
+        )
+        self.btn_theme.pack(side="left")
 
         # ── Title / subtitle ─────────────────────────────────────────────────
-        self.lbl_title = tk.Label(root, text=self.texts[self.lang]["title"],
-                                  font=("Arial", 14, "bold"), bg=self.bg_color, fg="white")
+        self.lbl_title = tk.Label(self.root, text=self.texts[self.lang]["title"],
+                                  font=("Arial", 14, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_title.pack(pady=(0, 2))
-        self.lbl_subtitle = tk.Label(root, text=self.texts[self.lang]["subtitle"],
+
+        self.lbl_subtitle = tk.Label(self.root, text=self.texts[self.lang]["subtitle"],
                                      bg=self.bg_color, fg=self.color_gray, justify="center")
         self.lbl_subtitle.pack(pady=(0, 10), fill="x")
         self.lbl_subtitle.bind("<Configure>", lambda e: self.lbl_subtitle.config(wraplength=e.width - 20))
 
         # ── Executable type selector ──────────────────────────────────────────
-        frame_type = tk.Frame(root, bg=self.bg_color)
-        frame_type.pack(fill="x", padx=20, pady=(0, 8))
+        self.frame_type = tk.Frame(self.root, bg=self.bg_color)
+        self.frame_type.pack(fill="x", padx=20, pady=(0, 8))
 
-        self.lbl_type = tk.Label(frame_type, text=self.texts[self.lang]["type_label"],
+        self.lbl_type = tk.Label(self.frame_type, text=self.texts[self.lang]["type_label"],
                                  font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_type.pack(anchor="w")
 
-        rb_style = {"bg": self.bg_color, "fg": self.fg_color,
-                    "activebackground": self.bg_color, "activeforeground": "white",
-                    "selectcolor": self.sec_bg, "relief": "flat", "cursor": "hand2"}
+        rb_style = {
+            "bg": self.bg_color, "fg": self.fg_color,
+            "activebackground": self.bg_color, "activeforeground": self.fg_color,
+            "selectcolor": self.sec_bg, "relief": "flat", "cursor": "hand2",
+        }
 
-        self.rb_wine = tk.Radiobutton(frame_type, text=self.texts[self.lang]["type_wine"],
+        self.rb_wine = tk.Radiobutton(self.frame_type, text=self.texts[self.lang]["type_wine"],
                                       variable=self.exe_type, value="wine",
                                       command=self.on_type_change, **rb_style)
         self.rb_wine.pack(anchor="w", padx=(16, 0))
 
-        self.rb_native = tk.Radiobutton(frame_type, text=self.texts[self.lang]["type_native"],
+        self.rb_native = tk.Radiobutton(self.frame_type, text=self.texts[self.lang]["type_native"],
                                         variable=self.exe_type, value="native",
                                         command=self.on_type_change, **rb_style)
         self.rb_native.pack(anchor="w", padx=(16, 0))
 
         # ── Step 1: executable ────────────────────────────────────────────────
-        self.lbl_step1 = tk.Label(root, text=self.texts[self.lang]["step1_default"],
+        self.lbl_step1 = tk.Label(self.root, text=self.texts[self.lang]["step1_default"],
                                   font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color,
                                   anchor="w", justify="left")
         self.lbl_step1.pack(anchor="w", padx=20, fill="x")
 
-        frame_exe = tk.Frame(root, bg=self.bg_color)
-        frame_exe.pack(fill="x", padx=20, pady=5)
+        self.frame_exe = tk.Frame(self.root, bg=self.bg_color)
+        self.frame_exe.pack(fill="x", padx=20, pady=5)
 
-        self.lbl_exe = tk.Label(frame_exe, text=self.texts[self.lang]["no_file"],
-                                fg=self.color_gray, bg=self.bg_color, justify="left",
-                                anchor="w")
+        self.lbl_exe = tk.Label(self.frame_exe, text=self.texts[self.lang]["no_file"],
+                                fg=self.color_gray, bg=self.bg_color, justify="left", anchor="w")
         self.lbl_exe.pack(side="left", expand=True, fill="x")
-        # Bind wraplength dynamically so it always fits the label's actual width
         self.lbl_exe.bind("<Configure>", lambda e: self.lbl_exe.config(wraplength=e.width - 4))
 
-        self.btn_browse = tk.Button(frame_exe, text=self.texts[self.lang]["browse_wine"],
+        self.btn_browse = tk.Button(self.frame_exe, text=self.texts[self.lang]["browse_wine"],
                                     command=self.selecionar_exe, **btn_style)
         self.btn_browse.pack(side="right")
 
         # ── Step 2: name ──────────────────────────────────────────────────────
-        self.lbl_step2 = tk.Label(root, text=self.texts[self.lang]["step2"],
+        self.lbl_step2 = tk.Label(self.root, text=self.texts[self.lang]["step2"],
                                   font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_step2.pack(anchor="w", padx=20, pady=(12, 0))
 
-        self.entry_nome = tk.Entry(root, font=("Arial", 11), bg=self.sec_bg,
-                                   fg="white", insertbackground="white", relief="flat")
+        self.entry_nome = tk.Entry(self.root, font=("Arial", 11), bg=self.sec_bg,
+                                   fg=self.fg_color, insertbackground=self.fg_color, relief="flat")
         self.entry_nome.pack(fill="x", padx=20, pady=5)
 
         # ── Step 3: icon ─────────────────────────────────────────────────────
-        self.lbl_step3 = tk.Label(root, text=self.texts[self.lang]["step3"],
+        self.lbl_step3 = tk.Label(self.root, text=self.texts[self.lang]["step3"],
                                   font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_step3.pack(anchor="w", padx=20, pady=(12, 0))
 
-        frame_icone = tk.Frame(root, bg=self.bg_color)
-        frame_icone.pack(fill="x", padx=20, pady=5)
+        self.frame_icone = tk.Frame(self.root, bg=self.bg_color)
+        self.frame_icone.pack(fill="x", padx=20, pady=5)
 
-        self.lbl_icone = tk.Label(frame_icone, text=self.texts[self.lang]["default_icon"],
-                                  fg=self.color_gray, bg=self.bg_color, justify="left",
-                                  anchor="w")
+        self.lbl_icone = tk.Label(self.frame_icone, text=self.texts[self.lang]["default_icon"],
+                                  fg=self.color_gray, bg=self.bg_color, justify="left", anchor="w")
         self.lbl_icone.pack(side="left", expand=True, fill="x")
         self.lbl_icone.bind("<Configure>", lambda e: self.lbl_icone.config(wraplength=e.width - 4))
 
-        self.btn_icon = tk.Button(frame_icone, text=self.texts[self.lang]["change_icon"],
+        self.btn_icon = tk.Button(self.frame_icone, text=self.texts[self.lang]["change_icon"],
                                   command=self.selecionar_icone_manual, **btn_style)
         self.btn_icon.pack(side="right")
 
         # ── Step 4: extra arguments ───────────────────────────────────────────
-        self.lbl_args = tk.Label(root, text=self.texts[self.lang]["args_label"],
+        self.lbl_args = tk.Label(self.root, text=self.texts[self.lang]["args_label"],
                                  font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_args.pack(anchor="w", padx=20, pady=(12, 0))
 
-        self.entry_args = tk.Entry(root, font=("Arial", 10), bg=self.sec_bg,
-                                   fg=self.color_gray, insertbackground="white", relief="flat")
+        self.entry_args = tk.Entry(self.root, font=("Arial", 10), bg=self.sec_bg,
+                                   fg=self.color_gray, insertbackground=self.fg_color, relief="flat")
         self.entry_args.pack(fill="x", padx=20, pady=5)
         self.entry_args.insert(0, self.texts[self.lang]["args_placeholder"])
         self.entry_args.bind("<FocusIn>",  self._args_focus_in)
@@ -266,22 +474,26 @@ class LinuxShortcutMaker:
         self._args_placeholder_active = True
 
         # ── Step 5: menu category ─────────────────────────────────────────────
-        self.lbl_cat = tk.Label(root, text=self.texts[self.lang]["cat_label"],
+        self.lbl_cat = tk.Label(self.root, text=self.texts[self.lang]["cat_label"],
                                 font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color)
         self.lbl_cat.pack(anchor="w", padx=20, pady=(12, 0))
 
-        frame_cat = tk.Frame(root, bg=self.bg_color)
-        frame_cat.pack(fill="x", padx=20, pady=5)
+        self.frame_cat = tk.Frame(self.root, bg=self.bg_color)
+        self.frame_cat.pack(fill="x", padx=20, pady=5)
 
-        # Build initial display labels from EN
         self._cat_keys    = [k for k, _ in self.texts[self.lang]["categories"]]
         self._cat_labels  = [lbl for _, lbl in self.texts[self.lang]["categories"]]
-        self._cat_display = tk.StringVar(value=self._cat_labels[0])  # "Utilities"
+        _initial_label = self._cat_labels[0]
+        for _key, _lbl in self.texts[self.lang]["categories"]:
+            if _key == self.category.get():
+                _initial_label = _lbl
+                break
+        self._cat_display = tk.StringVar(value=_initial_label)
 
-        self.opt_cat = tk.OptionMenu(frame_cat, self._cat_display, *self._cat_labels,
+        self.opt_cat = tk.OptionMenu(self.frame_cat, self._cat_display, *self._cat_labels,
                                      command=self._on_cat_change)
         self.opt_cat.config(bg=self.btn_bg, fg=self.btn_fg,
-                            activebackground="#555963", activeforeground="white",
+                            activebackground=p["active_bg"], activeforeground=self.btn_fg,
                             highlightthickness=0, relief="ridge", bd=1,
                             font=("Arial", 10))
         self.opt_cat["menu"].config(bg=self.btn_bg, fg=self.btn_fg,
@@ -290,11 +502,11 @@ class LinuxShortcutMaker:
         self.opt_cat.pack(side="left")
 
         # ── Create button ─────────────────────────────────────────────────────
-        self.btn_create = tk.Button(root, text=self.texts[self.lang]["btn_create"],
+        self.btn_create = tk.Button(self.root, text=self.texts[self.lang]["btn_create"],
                                     command=self.criar_atalho,
                                     font=("Arial", 11, "bold"), pady=8,
                                     bg=self.btn_accent, fg="white",
-                                    activebackground="#1565C0", activeforeground="white",
+                                    activebackground=p["accent_hl"], activeforeground="white",
                                     relief="flat")
         self.btn_create.pack(pady=18)
 
@@ -302,7 +514,7 @@ class LinuxShortcutMaker:
     def _args_focus_in(self, _event):
         if self._args_placeholder_active:
             self.entry_args.delete(0, tk.END)
-            self.entry_args.config(fg="white")
+            self.entry_args.config(fg=self.fg_color)
             self._args_placeholder_active = False
 
     def _args_focus_out(self, _event):
@@ -322,31 +534,26 @@ class LinuxShortcutMaker:
         t = self.texts[self.lang]
         is_wine = self.exe_type.get() == "wine"
 
-        # Show detection label but in orange to signal manual override
+        # Show detection label in orange to signal manual override
         self.lbl_step1.config(
             text=t["step1_wine"] if is_wine else t["step1_native"],
             fg=self.color_orange
         )
 
-        # Keep the already-selected file; just re-run icon logic for the new type
-        if self.caminho_exe:
-            if is_wine:
-                self.extrair_icone_automatico()
-            else:
-                self.buscar_icone_nativo(os.path.basename(self.caminho_exe))
+        # Reset icon to the appropriate default for the selected type.
+        # Extraction only happens in selecionar_exe, after the user picks a file.
+        if is_wine:
+            self.caminho_icone = "wine"
+            self.lbl_icone.config(text=t["default_icon"], fg=self.color_gray)
         else:
-            # No file yet — reset icon label to the appropriate default
-            if is_wine:
-                self.caminho_icone = "wine"
-                self.lbl_icone.config(text=t["default_icon"], fg=self.color_gray)
-            else:
-                self.caminho_icone = ""
-                self.lbl_icone.config(text=t["default_icon_native"], fg=self.color_gray)
-            self.status_icone = "default"
+            self.caminho_icone = ""
+            self.lbl_icone.config(text=t["default_icon_native"], fg=self.color_gray)
+        self.status_icone = "default"
 
     # ── Language toggle ───────────────────────────────────────────────────────
     def toggle_lang(self):
         self.lang = "pt" if self.lang == "en" else "en"
+        self._save_settings()
         t = self.texts[self.lang]
         is_wine = self.exe_type.get() == "wine"
 
@@ -390,17 +597,17 @@ class LinuxShortcutMaker:
 
     # ── Path persistence ──────────────────────────────────────────────────────
     def get_last_path(self):
-        if self.config_file.exists():
-            with open(self.config_file, 'r', encoding='utf-8') as f:
-                path = f.read().strip()
-                if os.path.isdir(path):
-                    return path
+        try:
+            path = self._load_settings().get("last_path", "")
+            if path and os.path.isdir(path):
+                return path
+        except Exception:
+            pass
         default_start = Path("/mnt")
         return str(default_start) if default_start.exists() else str(Path.home())
 
     def save_last_path(self, path):
-        with open(self.config_file, 'w', encoding='utf-8') as f:
-            f.write(path)
+        self._save_settings(last_path=path)
 
     # ── File selection ────────────────────────────────────────────────────────
     def _detectar_tipo(self, caminho):
@@ -416,7 +623,6 @@ class LinuxShortcutMaker:
         """
         lower = caminho.lower()
 
-        # 1. Extension: .exe is unambiguously Windows
         if lower.endswith(".exe"):
             return "wine"
 
@@ -426,23 +632,15 @@ class LinuxShortcutMaker:
         except OSError:
             return "native"
 
-        # 2. MZ magic → Windows PE
         if header[:2] == b"MZ":
             return "wine"
-
-        # 3. .sh extension → Linux shell script
         if lower.endswith(".sh"):
             return "native"
-
-        # 4. Shebang → script interpreted natively on Linux
         if header[:2] == b"#!":
             return "native"
-
-        # 5. ELF magic (7f E L F) → native Linux/Unix binary
         if header[:4] == b"\x7fELF":
             return "native"
 
-        # 6. Default: treat as native (safer than assuming Wine)
         return "native"
 
     def _aplicar_tipo(self, tipo):
@@ -458,7 +656,6 @@ class LinuxShortcutMaker:
     def selecionar_exe(self):
         t = self.texts[self.lang]
 
-        # Use the modern embedded file picker instead of the old native dialog
         caminho = self.modern_file_picker(
             title=t.get("ask_exe", "Select executable"),
             initialdir=self.get_last_path(),
@@ -479,8 +676,7 @@ class LinuxShortcutMaker:
             self.entry_nome.delete(0, tk.END)
             self.entry_nome.insert(0, nome_base)
 
-            # ── Auto-detect type and update radio buttons ──────────────────
-            # .sh files are always native regardless of current mode
+            # Auto-detect type and update radio buttons
             tipo_detectado = self._detectar_tipo(caminho)
             self._aplicar_tipo(tipo_detectado)
             # Lock .sh to native so manual override via radio can't break Exec line
@@ -527,10 +723,7 @@ class LinuxShortcutMaker:
 
     # ── Icon lookup: native Linux binary ─────────────────────────────────────
     def buscar_icone_nativo(self, nome_binario):
-        """
-        Heuristic: check common icon directories for a file whose name contains
-        the binary name (case-insensitive). If found, pre-fill the icon field.
-        """
+        """Heuristic: check common icon dirs for a file matching the binary name."""
         nome_lower = os.path.splitext(nome_binario)[0].lower()
         search_dirs = [
             "/usr/share/icons/hicolor/256x256/apps",
@@ -553,7 +746,6 @@ class LinuxShortcutMaker:
                         fg=self.color_green
                     )
                     return
-        # Nothing found — leave empty so user can pick manually
         self.caminho_icone = ""
         self.status_icone  = "default"
         self.lbl_icone.config(
@@ -576,27 +768,27 @@ class LinuxShortcutMaker:
                 fg=self.color_blue
             )
 
-    # ── Modern embedded file picker ─────────────────────────────────────────
+    # ── Modern embedded file picker ──────────────────────────────────────────
     def modern_file_picker(self, title="Select file", initialdir=None, filetypes=None):
-        """Use native system file picker (zenity/kdialog) for modern UI.
-        
-        Falls back to tkinter's filedialog if system tools unavailable.
+        """Use native system file picker for modern UI.
+
+        Priority: kdialog (KDE/Big Linux) -> zenity (GNOME) -> tkinter fallback.
+        kdialog is tried first because on KDE sessions zenity (a GTK app) can
+        randomly close or fail mid-session, causing the dialog to vanish.
+
         Returns the selected filepath string or empty string on cancel.
         """
         initialdir = initialdir or str(Path.home())
         filetypes = filetypes or [("All files", "*")]
 
-        # Try zenity (GNOME) first
-        result = self._try_zenity_picker(title, initialdir, filetypes)
-        if result is not None:  # Either success or user cancelled
-            return result
-        
-        # Try kdialog (KDE)
         result = self._try_kdialog_picker(title, initialdir, filetypes)
-        if result is not None:  # Either success or user cancelled
+        if result is not None:
             return result
-        
-        # Fallback to tkinter's native file dialog only if no system tools available
+
+        result = self._try_zenity_picker(title, initialdir, filetypes)
+        if result is not None:
+            return result
+
         return filedialog.askopenfilename(
             title=title,
             initialdir=initialdir,
@@ -605,56 +797,54 @@ class LinuxShortcutMaker:
 
     def _try_zenity_picker(self, title, initialdir, filetypes):
         """Try to use zenity (GNOME file picker).
-        
+
         Returns: filepath string if successful, "" if cancelled, None if unavailable
         """
         try:
             if subprocess.run(["which", "zenity"], capture_output=True).returncode != 0:
                 return None
-            
-            # Build file type filters for zenity
+
             filters = []
             for label, pattern in filetypes:
                 patterns = pattern.split()
                 filter_str = " ".join(patterns)
                 filters.extend(["--file-filter", f"{label} | {filter_str}"])
-            
-            cmd = ["zenity", "--file-selection", "--title", title, 
+
+            cmd = ["zenity", "--file-selection", "--title", title,
                    "--filename", str(initialdir) + "/"] + filters
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                return result.stdout.strip()  # File selected
+                return result.stdout.strip()
             else:
-                return ""  # User cancelled
+                return ""
         except Exception:
-            return None  # Tool unavailable
+            return None
 
     def _try_kdialog_picker(self, title, initialdir, filetypes):
         """Try to use kdialog (KDE file picker).
-        
+
         Returns: filepath string if successful, "" if cancelled, None if unavailable
         """
         try:
             if subprocess.run(["which", "kdialog"], capture_output=True).returncode != 0:
                 return None
-            
-            # Build file type filters for kdialog
+
             filters = ""
             for label, pattern in filetypes:
                 patterns = pattern.split()
                 filter_str = " ".join(patterns)
                 filters += f"{label} ({filter_str}) "
-            
+
             cmd = ["kdialog", "--getopenfilename", str(initialdir), filters, "--title", title]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
-                return result.stdout.strip()  # File selected
+                return result.stdout.strip()
             else:
-                return ""  # User cancelled
+                return ""
         except Exception:
-            return None  # Tool unavailable
+            return None
 
     # ── Category dropdown callback ────────────────────────────────────────────
     def _on_cat_change(self, selected_label):
@@ -662,6 +852,7 @@ class LinuxShortcutMaker:
         for key, lbl in self.texts[self.lang]["categories"]:
             if lbl == selected_label:
                 self.category.set(key)
+                self._save_settings()
                 break
 
     def _refresh_cat_menu(self):
@@ -670,7 +861,6 @@ class LinuxShortcutMaker:
         self._cat_keys   = [k for k, _ in cats]
         self._cat_labels = [lbl for _, lbl in cats]
 
-        # Find current key's label in new language
         current_key = self.category.get()
         new_label = self._cat_labels[0]
         for key, lbl in cats:
@@ -710,14 +900,12 @@ class LinuxShortcutMaker:
             .strip().replace(" ", "_").lower()
         )
 
-        # Build Exec line
         is_shell_script = self.caminho_exe.lower().endswith(".sh")
         if is_wine and not is_shell_script:
             args_part = f' "{extra_args}"' if extra_args else ""
             exec_cmd  = f'sh -c "wine \\"{self.caminho_exe}\\"{args_part} > /dev/null 2>&1"'
             prefix    = "wine_"
         else:
-            # Native binary or .sh script — run directly (or via sh for scripts)
             args_part = f" {extra_args}" if extra_args else ""
             if is_shell_script:
                 exec_cmd = f'sh "{self.caminho_exe}"{args_part}'
@@ -725,7 +913,6 @@ class LinuxShortcutMaker:
                 exec_cmd = f'"{self.caminho_exe}"{args_part}'
             prefix    = "native_"
 
-        # Determine icon value
         icon_value = self.caminho_icone if self.caminho_icone else "application-x-executable"
 
         xdg_cat = self.category.get()
@@ -757,7 +944,6 @@ class LinuxShortcutMaker:
                     f.write(conteudo_desktop)
                 os.chmod(destino, 0o755)
 
-            # Mark desktop file as trusted (GNOME)
             if arquivo_desktop.exists():
                 subprocess.run(
                     ['gio', 'set', str(arquivo_desktop), 'metadata::trusted', 'true'],
