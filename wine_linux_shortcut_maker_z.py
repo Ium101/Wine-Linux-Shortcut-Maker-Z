@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import configparser
@@ -10,13 +11,13 @@ from pathlib import Path
 THEMES = {
     "dark": {
         "bg":        "#232429",
-        "fg":        "#E0E0E0",
+        "fg":        "#FFFFFF",
         "sec_bg":    "#2D2E33",
         "btn_bg":    "#3A3D45",
         "btn_fg":    "#FFFFFF",
         "accent":    "#1976D2",
         "accent_hl": "#1565C0",
-        "gray":      "#8E929B",
+        "gray":      "#D0D3DA",
         "green":     "#81C995",
         "red":       "#F28B82",
         "orange":    "#F6BF26",
@@ -33,7 +34,7 @@ THEMES = {
         "btn_fg":    "#1C1C1E",
         "accent":    "#1565C0",
         "accent_hl": "#0D47A1",
-        "gray":      "#636366",
+        "gray":      "#555558",
         "green":     "#2E7D32",
         "red":       "#C62828",
         "orange":    "#E65100",
@@ -290,7 +291,7 @@ class LinuxShortcutMaker:
         self.rb_native.config(**rb_cfg)
 
         # Step 1 – exe
-        self.lbl_step1.config(bg=self.bg_color)        # fg is dynamic; don't touch it
+        self.lbl_step1.config(bg=self.bg_color, fg=self.fg_color)
         self.frame_exe.configure(bg=self.bg_color)
         self.lbl_exe.config(bg=self.bg_color)          # fg is dynamic; don't touch it
         self.btn_browse.config(
