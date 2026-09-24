@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os
 import sys
+import glob
+import tempfile
 import configparser
 import subprocess
 import tkinter as tk
@@ -46,6 +48,182 @@ THEMES = {
 }
 
 
+# ── AppImage helpers ──────────────────────────────────────────────────────────
+ICON_EXTS = (".png", ".svg", ".xpm")
+GENERIC_ICON_NAMES = {"icon", "app", "application", "logo", "main", "default"}
+
+# An icon read out of an AppImage is only written here when a shortcut is actually
+# created (and only if the icon isn't already installed) — never on the Desktop
+# and never inside the shared icon-theme folders.
+APPIMAGE_ICON_DIR = Path.home() / ".local" / "share" / "wine_linux_shortcut_maker_z" / "icons"
+
+
+def eh_appimage(header, nome_arquivo):
+    """True if `header` (first bytes of a file) belongs to an AppImage.
+
+    AppImage type 1/2 files are ELF binaries carrying the bytes 'A' 'I' 0x01/0x02
+    at offset 8. An ELF file named *.AppImage is accepted as a fallback.
+    """
+    if header[:4] != b"\x7fELF":
+        return False
+    if header[8:10] == b"AI" and header[10:11] in (b"\x01", b"\x02"):
+        return True
+    return nome_arquivo.lower().endswith(".appimage")
+
+
+def _dentro(base, alvo):
+    """True if `alvo` really lives inside `base` (guards against hostile symlinks)."""
+    base = os.path.realpath(base)
+    alvo = os.path.realpath(alvo)
+    return alvo == base or alvo.startswith(base + os.sep)
+
+
+def _ext_imagem(dados):
+    """Return '.png' / '.svg' / '.xpm' by sniffing the bytes, or None."""
+    if dados[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    cabecalho = dados[:2048].lstrip().lower()
+    if cabecalho.startswith(b"<svg") or (cabecalho.startswith(b"<?xml") and b"<svg" in cabecalho):
+        return ".svg"
+    if dados[:9] == b"/* XPM */":
+        return ".xpm"
+    return None
+
+
+def _appimage_extract(caminho, padrao, tmp):
+    """Ask the AppImage's own runtime to extract the files matching `padrao`.
+
+    Output lands in <tmp>/squashfs-root. The working directory is a temp folder,
+    so nothing is ever created next to the AppImage or on the Desktop.
+    """
+    try:
+        subprocess.run(
+            [caminho, "--appimage-extract", padrao],
+            cwd=tmp, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _ler_desktop(arquivo):
+    """Return (Name, Icon) from the [Desktop Entry] group of a .desktop file."""
+    nome = icone = None
+    dentro = False
+    try:
+        with open(arquivo, encoding="utf-8", errors="replace") as f:
+            for linha in f:
+                linha = linha.strip()
+                if linha.startswith("["):
+                    dentro = linha == "[Desktop Entry]"
+                elif dentro and linha.startswith("Name=") and nome is None:
+                    nome = linha[5:].strip() or None
+                elif dentro and linha.startswith("Icon=") and icone is None:
+                    icone = linha[5:].strip() or None
+    except OSError:
+        pass
+    return nome, icone
+
+
+def icone_instalado(nome):
+    """True if `nome` already resolves to an icon on this system (theme or pixmaps)."""
+    if not nome or nome.lower() in GENERIC_ICON_NAMES or os.sep in nome:
+        return False
+    bases = [
+        Path.home() / ".local" / "share" / "icons",
+        Path.home() / ".icons",
+        Path("/usr/share/icons"),
+        Path("/usr/share/pixmaps"),
+    ]
+    padroes = ["{n}{e}", "*/*/apps/{n}{e}", "*/apps/*/{n}{e}"]
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for ext in ICON_EXTS:
+            for padrao in padroes:
+                if next(base.glob(padrao.format(n=glob.escape(nome), e=ext)), None):
+                    return True
+    return False
+
+
+def _carregar_icone(info, raiz, rel):
+    """Load <raiz>/<rel> into `info` if it is a real, reasonably sized image."""
+    alvo = os.path.join(raiz, rel)
+    try:
+        if not (os.path.isfile(alvo) and _dentro(raiz, alvo)):
+            return False
+        if os.path.getsize(alvo) > 5 * 1024 * 1024:
+            return False
+        with open(alvo, "rb") as f:
+            dados = f.read()
+    except OSError:
+        return False
+    ext = _ext_imagem(dados)
+    if not ext:
+        return False
+    info["icone_dados"], info["icone_ext"] = dados, ext
+    return True
+
+
+def extrair_dados_appimage(caminho):
+    """Read the display name and icon out of an AppImage without leaving files behind.
+
+    Returns a dict:
+      nome             Name= from the AppImage's own .desktop (or None)
+      icone_nome       Icon= name declared by that .desktop (or None)
+      icone_instalado  True if that icon name already exists on this system,
+                       so no icon file has to be written anywhere
+      icone_dados      raw bytes of the embedded icon (only when not installed)
+      icone_ext        '.png' / '.svg' / '.xpm' for icone_dados
+    """
+    info = {"nome": None, "icone_nome": None, "icone_instalado": False,
+            "icone_dados": None, "icone_ext": None}
+
+    with tempfile.TemporaryDirectory(prefix="wlsm_appimage_") as tmp:
+        raiz = os.path.join(tmp, "squashfs-root")
+
+        # 1) The AppImage's own .desktop gives us the app name and icon name.
+        _appimage_extract(caminho, "*.desktop", tmp)
+        candidatos = sorted(glob.glob(os.path.join(raiz, "*.desktop")))
+        candidatos += sorted(glob.glob(os.path.join(raiz, "usr", "share", "applications", "*.desktop")))
+        for arq in candidatos:
+            if _dentro(raiz, arq):
+                info["nome"], info["icone_nome"] = _ler_desktop(arq)
+                break
+
+        # 2) Icon already installed on the system? Then there is nothing to copy.
+        if icone_instalado(info["icone_nome"]):
+            info["icone_instalado"] = True
+            return info
+
+        # 3) Otherwise read it from inside the AppImage: .DirIcon, which is
+        #    usually a symlink to the real image (follow it, extracting each hop).
+        rel = ".DirIcon"
+        for _ in range(4):
+            _appimage_extract(caminho, rel, tmp)
+            alvo = os.path.join(raiz, rel)
+            if os.path.islink(alvo):
+                destino = os.readlink(alvo)
+                novo = os.path.normpath(os.path.join(os.path.dirname(rel), destino))
+                if os.path.isabs(destino) or novo.startswith(".."):
+                    break
+                rel = novo
+                continue
+            _carregar_icone(info, raiz, rel)
+            break
+
+        # 4) ...or the file named by Icon= (name.png / name.svg / name.xpm).
+        nome_icone = info["icone_nome"]
+        if info["icone_dados"] is None and nome_icone and os.sep not in nome_icone:
+            for ext in ICON_EXTS:
+                _appimage_extract(caminho, nome_icone + ext, tmp)
+                if _carregar_icone(info, raiz, nome_icone + ext):
+                    break
+
+    return info
+
+
 class LinuxShortcutMaker:
     def __init__(self, root):
         self.root = root
@@ -85,8 +263,10 @@ class LinuxShortcutMaker:
                 "type_label": "Executable Type:",
                 "type_wine": "Windows (.exe via Wine)",
                 "type_native": "Native Linux executable",
+                "type_appimage": "Linux AppImage",
                 "step1_wine": "1. Executable File:  \u2192 detected as Windows/Wine",
                 "step1_native": "1. Executable File:  \u2192 detected as Linux native",
+                "step1_appimage": "1. Executable File:  \u2192 detected as Linux AppImage",
                 "step1_default": "1. Executable File:",
                 "no_file": "No file selected",
                 "browse_wine": "Browse...",
@@ -107,6 +287,9 @@ class LinuxShortcutMaker:
                 "custom_icon": "Custom: ",
                 "success_title": "Absolute Success!",
                 "success_msg_wine":   "The program '{0}' was configured!\n\n✓ Shortcut created with Anti-Crash protection (EBADF).\n✓ Added to Start Menu and Desktop.",
+                "success_msg_appimage": "The program '{0}' was configured!\n\n✓ AppImage shortcut created.\n✓ Added to Start Menu and Desktop.",
+                "icon_reused": "✅ Icon already installed: {0}",
+                "ext_success_appimage": "✅ Icon read from the AppImage!",
                 "success_msg_native": "The program '{0}' was configured!\n\n✓ Native Linux shortcut created.\n✓ Added to Start Menu and Desktop.",
                 "err_title": "Error",
                 "err_msg": "A problem occurred while saving the shortcuts:\n{0}",
@@ -134,8 +317,10 @@ class LinuxShortcutMaker:
                 "type_label": "Tipo de Executável:",
                 "type_wine": "Windows (.exe via Wine)",
                 "type_native": "Executável nativo Linux",
+                "type_appimage": "AppImage Linux",
                 "step1_wine": "1. Arquivo Executável:  \u2192 detectado como Windows/Wine",
                 "step1_native": "1. Arquivo Executável:  \u2192 detectado como Linux nativo",
+                "step1_appimage": "1. Arquivo Executável:  \u2192 detectado como AppImage Linux",
                 "step1_default": "1. Arquivo Executável:",
                 "no_file": "Nenhum arquivo selecionado",
                 "browse_wine": "Procurar...",
@@ -156,6 +341,9 @@ class LinuxShortcutMaker:
                 "custom_icon": "Personalizado: ",
                 "success_title": "Sucesso Absoluto!",
                 "success_msg_wine":   "O programa '{0}' foi configurado!\n\n✓ Atalho criado com proteção contra crash (EBADF).\n✓ Adicionado ao Menu Iniciar e Área de Trabalho.",
+                "success_msg_appimage": "O programa '{0}' foi configurado!\n\n✓ Atalho de AppImage criado.\n✓ Adicionado ao Menu Iniciar e Área de Trabalho.",
+                "icon_reused": "✅ Ícone já instalado: {0}",
+                "ext_success_appimage": "✅ Ícone lido de dentro do AppImage!",
                 "success_msg_native": "O programa '{0}' foi configurado!\n\n✓ Atalho nativo Linux criado.\n✓ Adicionado ao Menu Iniciar e Área de Trabalho.",
                 "err_title": "Erro",
                 "err_msg": "Ocorreu um problema ao salvar os atalhos:\n{0}",
@@ -182,6 +370,7 @@ class LinuxShortcutMaker:
         self.caminho_exe   = ""
         self.caminho_icone = "wine"
         self.status_icone  = "default"
+        self._icone_appimage = None   # (bytes, ext) read from an AppImage; written only on "Create"
         self.category      = tk.StringVar(value=settings.get("category", "Utility"))
 
         self._build_ui()
@@ -289,6 +478,7 @@ class LinuxShortcutMaker:
         )
         self.rb_wine.config(**rb_cfg)
         self.rb_native.config(**rb_cfg)
+        self.rb_appimage.config(**rb_cfg)
 
         # Step 1 – exe
         self.lbl_step1.config(bg=self.bg_color, fg=self.fg_color)
@@ -416,6 +606,11 @@ class LinuxShortcutMaker:
                                         command=self.on_type_change, **rb_style)
         self.rb_native.pack(anchor="w", padx=(16, 0))
 
+        self.rb_appimage = tk.Radiobutton(self.frame_type, text=self.texts[self.lang]["type_appimage"],
+                                          variable=self.exe_type, value="appimage",
+                                          command=self.on_type_change, **rb_style)
+        self.rb_appimage.pack(anchor="w", padx=(16, 0))
+
         # ── Step 1: executable ────────────────────────────────────────────────
         self.lbl_step1 = tk.Label(self.root, text=self.texts[self.lang]["step1_default"],
                                   font=("Arial", 10, "bold"), bg=self.bg_color, fg=self.fg_color,
@@ -529,6 +724,10 @@ class LinuxShortcutMaker:
             return ""
         return self.entry_args.get().strip()
 
+    def _step1_key(self):
+        """Translation key for the Step 1 label, based on the selected executable type."""
+        return {"wine": "step1_wine", "appimage": "step1_appimage"}.get(self.exe_type.get(), "step1_native")
+
     # ── Type-change callback (manual override) ────────────────────────────────
     def on_type_change(self):
         t = self.texts[self.lang]
@@ -536,7 +735,7 @@ class LinuxShortcutMaker:
 
         # Show detection label in orange to signal manual override
         self.lbl_step1.config(
-            text=t["step1_wine"] if is_wine else t["step1_native"],
+            text=t[self._step1_key()],
             fg=self.color_orange
         )
 
@@ -549,6 +748,7 @@ class LinuxShortcutMaker:
             self.caminho_icone = ""
             self.lbl_icone.config(text=t["default_icon_native"], fg=self.color_gray)
         self.status_icone = "default"
+        self._icone_appimage = None
 
     # ── Language toggle ───────────────────────────────────────────────────────
     def toggle_lang(self):
@@ -563,8 +763,9 @@ class LinuxShortcutMaker:
         self.lbl_type.config(text=t["type_label"])
         self.rb_wine.config(text=t["type_wine"])
         self.rb_native.config(text=t["type_native"])
+        self.rb_appimage.config(text=t["type_appimage"])
         if self.caminho_exe:
-            self.lbl_step1.config(text=t["step1_wine"] if is_wine else t["step1_native"])
+            self.lbl_step1.config(text=t[self._step1_key()])
         else:
             self.lbl_step1.config(text=t["step1_default"], fg=self.fg_color)
         self.lbl_step2.config(text=t["step2"])
@@ -580,7 +781,9 @@ class LinuxShortcutMaker:
         if self.status_icone == "default":
             self.lbl_icone.config(text=t["default_icon"] if is_wine else t["default_icon_native"])
         elif self.status_icone == "success":
-            self.lbl_icone.config(text=t["ext_success"])
+            self.lbl_icone.config(text=t["ext_success_appimage"] if self._icone_appimage else t["ext_success"])
+        elif self.status_icone == "reused":
+            self.lbl_icone.config(text=t["icon_reused"].format(self.caminho_icone))
         elif self.status_icone == "fail":
             self.lbl_icone.config(text=t["ext_fail"])
         elif self.status_icone == "custom":
@@ -611,15 +814,16 @@ class LinuxShortcutMaker:
 
     # ── File selection ────────────────────────────────────────────────────────
     def _detectar_tipo(self, caminho):
-        """Return 'wine' if the file is a Windows PE executable, 'native' otherwise.
+        """Return 'wine' (Windows PE), 'appimage' or 'native'.
 
         Detection order:
         1. .exe extension              → wine
         2. MZ magic bytes (PE header)  → wine
         3. .sh extension               → native
         4. Shebang (#!) first line     → native  (sh, bash, python, ruby, node, perl…)
-        5. ELF magic bytes (7f 45 4c 46) → native
-        6. Fallback                    → native
+        5. ELF + AppImage magic ('AI' 0x01/0x02 at offset 8, or *.AppImage) → appimage
+        6. ELF magic bytes (7f 45 4c 46) → native
+        7. Fallback                    → native
         """
         lower = caminho.lower()
 
@@ -628,7 +832,7 @@ class LinuxShortcutMaker:
 
         try:
             with open(caminho, "rb") as f:
-                header = f.read(4)
+                header = f.read(16)
         except OSError:
             return "native"
 
@@ -639,7 +843,7 @@ class LinuxShortcutMaker:
         if header[:2] == b"#!":
             return "native"
         if header[:4] == b"\x7fELF":
-            return "native"
+            return "appimage" if eh_appimage(header, lower) else "native"
 
         return "native"
 
@@ -647,10 +851,9 @@ class LinuxShortcutMaker:
         """Set the radio button and show the detection result in the step label."""
         self.exe_type.set(tipo)
         t = self.texts[self.lang]
-        is_wine = tipo == "wine"
         self.lbl_step1.config(
-            text=t["step1_wine"] if is_wine else t["step1_native"],
-            fg=self.color_blue if is_wine else self.color_purple
+            text=t[self._step1_key()],
+            fg={"wine": self.color_blue, "appimage": self.color_green}.get(tipo, self.color_purple)
         )
 
     def selecionar_exe(self):
@@ -661,18 +864,25 @@ class LinuxShortcutMaker:
             initialdir=self.get_last_path(),
             filetypes=[
                 ("All files", "*"),
-                ("Executables", "*.exe *.sh *.bin *.run *.AppImage *.elf"),
+                ("Executables", "*.exe *.sh *.bin *.run *.AppImage *.appimage *.elf"),
                 ("Shell scripts", "*.sh"),
                 ("Windows executables", "*.exe"),
             ]
         )
 
         if caminho:
+            escolhido = caminho
+            # Resolve symlinks right away. A link kept on the Desktop (or in any other
+            # folder) must never be mistaken for the program's real location, or the
+            # shortcut's working directory (Path=) would point there and the program
+            # would drop its files in that folder.
+            caminho = os.path.realpath(caminho)
             self.caminho_exe = caminho
-            self.save_last_path(os.path.dirname(caminho))
+            self._icone_appimage = None
+            self.save_last_path(os.path.dirname(escolhido))
             self.lbl_exe.config(text=os.path.basename(caminho), fg=self.fg_color)
 
-            nome_base = os.path.splitext(os.path.basename(caminho))[0].replace("_", " ").replace("-", " ").title()
+            nome_base = os.path.splitext(os.path.basename(escolhido))[0].replace("_", " ").replace("-", " ").title()
             self.entry_nome.delete(0, tk.END)
             self.entry_nome.insert(0, nome_base)
 
@@ -684,8 +894,8 @@ class LinuxShortcutMaker:
                 tipo_detectado = "native"
                 self._aplicar_tipo("native")
 
-            badge = "  [Windows/Wine]" if tipo_detectado == "wine" else "  [Linux native]"
-            badge_color = self.color_blue if tipo_detectado == "wine" else self.color_purple
+            badge = {"wine": "  [Windows/Wine]", "appimage": "  [AppImage]"}.get(tipo_detectado, "  [Linux native]")
+            badge_color = {"wine": self.color_blue, "appimage": self.color_green}.get(tipo_detectado, self.color_purple)
             self.lbl_exe.config(
                 text=os.path.basename(caminho) + badge,
                 fg=badge_color
@@ -693,6 +903,8 @@ class LinuxShortcutMaker:
 
             if tipo_detectado == "wine":
                 self.extrair_icone_automatico()
+            elif tipo_detectado == "appimage":
+                self.extrair_icone_appimage()
             else:
                 self.buscar_icone_nativo(os.path.basename(caminho))
 
@@ -752,6 +964,54 @@ class LinuxShortcutMaker:
             text=self.texts[self.lang]["default_icon_native"],
             fg=self.color_gray
         )
+
+    # ── Icon: AppImage ───────────────────────────────────────────────────────
+    @staticmethod
+    def _garantir_executavel(caminho):
+        """An AppImage has to be executable to launch (and to read its own icon)."""
+        try:
+            if not os.access(caminho, os.X_OK):
+                os.chmod(caminho, os.stat(caminho).st_mode | 0o111)
+        except OSError:
+            pass
+
+    def extrair_icone_appimage(self):
+        """Read the name and icon straight from the AppImage.
+
+        Nothing is written to disk here. The icon stays in memory until the
+        shortcut is created, and is not written at all when an icon with the
+        same name is already installed on the system.
+        """
+        t = self.texts[self.lang]
+        self.lbl_icone.config(text=t["extracting"], fg=self.color_orange)
+        self.root.update()
+
+        self._garantir_executavel(self.caminho_exe)
+        info = extrair_dados_appimage(self.caminho_exe)
+
+        if info["nome"]:
+            self.entry_nome.delete(0, tk.END)
+            self.entry_nome.insert(0, info["nome"])
+
+        if info["icone_instalado"]:
+            self.caminho_icone = info["icone_nome"]
+            self.status_icone  = "reused"
+            self.lbl_icone.config(text=t["icon_reused"].format(info["icone_nome"]), fg=self.color_green)
+        elif info["icone_dados"]:
+            self._icone_appimage = (info["icone_dados"], info["icone_ext"])
+            self.caminho_icone   = ""
+            self.status_icone    = "success"
+            self.lbl_icone.config(text=t["ext_success_appimage"], fg=self.color_green)
+        else:
+            self.buscar_icone_nativo(os.path.basename(self.caminho_exe))
+
+    def _gravar_icone_appimage(self, nome_arquivo_seguro):
+        """Save the in-memory AppImage icon (only called when the shortcut is created)."""
+        dados, ext = self._icone_appimage
+        APPIMAGE_ICON_DIR.mkdir(parents=True, exist_ok=True)
+        destino = APPIMAGE_ICON_DIR / f"{nome_arquivo_seguro or 'appimage'}{ext}"
+        destino.write_bytes(dados)
+        return str(destino)
 
     # ── Manual icon picker ────────────────────────────────────────────────────
     def selecionar_icone_manual(self):
@@ -830,13 +1090,23 @@ class LinuxShortcutMaker:
             if subprocess.run(["which", "kdialog"], capture_output=True).returncode != 0:
                 return None
 
-            filters = ""
-            for label, pattern in filetypes:
-                patterns = pattern.split()
-                filter_str = " ".join(patterns)
-                filters += f"{label} ({filter_str}) "
+            # kdialog does not understand several "Label (patterns)" entries glued
+            # into one string (it can end up listing only the last pattern, hiding
+            # e.g. .AppImage files). When "All files" is the first entry, which is
+            # the default anyway, just don't pass a filter at all.
+            if filetypes and filetypes[0][1].strip() == "*":
+                filters = ""
+            else:
+                filters = ""
+                for label, pattern in filetypes:
+                    patterns = pattern.split()
+                    filter_str = " ".join(patterns)
+                    filters += f"{label} ({filter_str}) "
 
-            cmd = ["kdialog", "--getopenfilename", str(initialdir), filters, "--title", title]
+            cmd = ["kdialog", "--getopenfilename", str(initialdir)]
+            if filters:
+                cmd.append(filters)
+            cmd += ["--title", title]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
@@ -880,6 +1150,7 @@ class LinuxShortcutMaker:
     def criar_atalho(self):
         t = self.texts[self.lang]
         is_wine = self.exe_type.get() == "wine"
+        is_appimage = self.exe_type.get() == "appimage"
 
         if not self.caminho_exe:
             messagebox.showwarning("Atenção / Warning", t["err_step1"])
@@ -891,8 +1162,15 @@ class LinuxShortcutMaker:
             return
 
         extra_args = self._get_args()
+        # Working directory of the launcher. caminho_exe is already symlink-resolved,
+        # so this is the program's real folder, never the Desktop where a link or
+        # the shortcut itself may live.
         pasta_trabalho = os.path.dirname(self.caminho_exe)
         pasta_desktop  = self.obter_area_de_trabalho()
+        # ...except an AppImage that physically sits on the Desktop: don't make the
+        # Desktop its working folder, start it from the home folder instead.
+        if is_appimage and os.path.realpath(pasta_trabalho) == os.path.realpath(pasta_desktop):
+            pasta_trabalho = str(Path.home())
         pasta_menu     = Path.home() / ".local" / "share" / "applications"
 
         nome_arquivo_seguro = (
@@ -903,17 +1181,23 @@ class LinuxShortcutMaker:
         is_shell_script = self.caminho_exe.lower().endswith(".sh")
         if is_wine and not is_shell_script:
             args_part = f' "{extra_args}"' if extra_args else ""
-            exec_cmd  = f'sh -c "wine \\"{self.caminho_exe}\\"{args_part} > /dev/null 2>&1"'
+            exec_cmd  = f'sh -c "cd \\"{pasta_trabalho}\\" && wine \\"{self.caminho_exe}\\"{args_part} > /dev/null 2>&1"'
             prefix    = "wine_"
         else:
             args_part = f" {extra_args}" if extra_args else ""
-            if is_shell_script:
-                exec_cmd = f'sh "{self.caminho_exe}"{args_part}'
-            else:
-                exec_cmd = f'"{self.caminho_exe}"{args_part}'
-            prefix    = "native_"
+            programa = f'sh "{self.caminho_exe}"' if is_shell_script else f'"{self.caminho_exe}"'
+            # `env -C` changes directory before starting the program. Path= alone is
+            # not honoured by every launcher, and when it isn't, the program starts
+            # in the folder the shortcut was launched from (e.g. the Desktop).
+            exec_cmd = f'env -C "{pasta_trabalho}" {programa}{args_part}'
+            prefix    = "appimage_" if is_appimage else "native_"
 
         icon_value = self.caminho_icone if self.caminho_icone else "application-x-executable"
+        if is_appimage and self.status_icone == "success" and self._icone_appimage:
+            try:
+                icon_value = self._gravar_icone_appimage(nome_arquivo_seguro)
+            except OSError:
+                pass  # keep the generic icon
 
         xdg_cat = self.category.get()
         if is_wine and not is_shell_script:
@@ -955,7 +1239,7 @@ class LinuxShortcutMaker:
                 stderr=subprocess.DEVNULL
             )
 
-            msg_key = "success_msg_wine" if is_wine else "success_msg_native"
+            msg_key = "success_msg_wine" if is_wine else "success_msg_appimage" if is_appimage else "success_msg_native"
             messagebox.showinfo(t["success_title"], t[msg_key].format(nome_atalho))
 
         except Exception as e:
