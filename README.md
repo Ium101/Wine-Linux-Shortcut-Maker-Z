@@ -20,6 +20,7 @@ Creating symbolic links directly to an `.exe` file on the Linux Desktop usually 
 
 - 🗔 **Intuitive Graphical Interface:** No need to use the terminal to create shortcuts.
 - 📂 **Automatic Path Detection:** Instantly identifies the root folder of the `.exe` file.
+- 📦 **AppImage Support:** Also detects Linux `.AppImage` files and reuses their built-in icon.
 - 💻 **Smart Installer (`build.sh`):** Compiles the program in the local folder and creates a native shortcut directly in your system's Start Menu.
 - 🛠️ **Case-Insensitive:** The build script recognizes code in both uppercase and lowercase.
 
@@ -51,6 +52,7 @@ Criar links simbólicos diretamente para um arquivo `.exe` na Área de Trabalho 
 
 - 🗔 **Interface Gráfica Intuitiva:** Sem necessidade de usar o terminal para criar atalhos.
 - 📂 **Detecção Automática de Caminho:** Identifica instantaneamente a pasta raiz do arquivo `.exe`.
+- 📦 **Suporte a AppImage:** Também detecta arquivos `.AppImage` do Linux e reaproveita o ícone já embutido neles.
 - 💻 **Instalador Inteligente (`build.sh`):** Compila o programa na pasta local e cria um atalho nativo diretamente no Menu Iniciar do seu sistema.
 - 🛠️ **Sem Distinção de Maiúsculas/Minúsculas:** O script de build reconhece o código tanto em letras maiúsculas quanto minúsculas.
 
