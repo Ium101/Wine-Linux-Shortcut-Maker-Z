@@ -228,7 +228,7 @@ class LinuxShortcutMaker:
     def __init__(self, root):
         self.root = root
         self.root.title("Wine Linux Shortcut Maker Z")
-        self.root.minsize(480, 0)
+        self.root.minsize(560, 0)
         self.root.eval('tk::PlaceWindow . center')
         self.root.resizable(True, True)
 
@@ -251,8 +251,8 @@ class LinuxShortcutMaker:
         self._apply_palette()
         self.root.configure(bg=self.bg_color)
 
-        # --- Executable type ---
-        self.exe_type = tk.StringVar(value="wine")
+        # --- Executable type (restores the last manually-picked option) ---
+        self.exe_type = tk.StringVar(value=settings.get("exe_type", "wine"))
 
         # --- Translation dictionary ---
         self.lang = settings.get("language", "en")
@@ -264,9 +264,9 @@ class LinuxShortcutMaker:
                 "type_wine": "Windows (.exe via Wine)",
                 "type_native": "Native Linux executable",
                 "type_appimage": "Linux AppImage",
-                "step1_wine": "1. Executable File:  \u2192 detected as Windows/Wine",
-                "step1_native": "1. Executable File:  \u2192 detected as Linux native",
-                "step1_appimage": "1. Executable File:  \u2192 detected as Linux AppImage",
+                "step1_wine": "1. Executable File:  \u2192 Detected as Windows/Wine",
+                "step1_native": "1. Executable File:  \u2192 Detected as Linux native executable",
+                "step1_appimage": "1. Executable File:  \u2192 Detected as Linux AppImage",
                 "step1_default": "1. Executable File:",
                 "no_file": "No file selected",
                 "browse_wine": "Browse...",
@@ -318,9 +318,9 @@ class LinuxShortcutMaker:
                 "type_wine": "Windows (.exe via Wine)",
                 "type_native": "Executável nativo Linux",
                 "type_appimage": "AppImage Linux",
-                "step1_wine": "1. Arquivo Executável:  \u2192 detectado como Windows/Wine",
-                "step1_native": "1. Arquivo Executável:  \u2192 detectado como Linux nativo",
-                "step1_appimage": "1. Arquivo Executável:  \u2192 detectado como AppImage Linux",
+                "step1_wine": "1. Arquivo Executável:  \u2192 Detectado como Windows/Wine",
+                "step1_native": "1. Arquivo Executável:  \u2192 Detectado como Executável nativo Linux",
+                "step1_appimage": "1. Arquivo Executável:  \u2192 Detectado como AppImage Linux",
                 "step1_default": "1. Arquivo Executável:",
                 "no_file": "Nenhum arquivo selecionado",
                 "browse_wine": "Procurar...",
@@ -368,12 +368,42 @@ class LinuxShortcutMaker:
         }
 
         self.caminho_exe   = ""
-        self.caminho_icone = "wine"
+        # Default icon-label state matches whichever type was restored above.
+        self.caminho_icone = "wine" if self.exe_type.get() == "wine" else ""
         self.status_icone  = "default"
         self._icone_appimage = None   # (bytes, ext) read from an AppImage; written only on "Create"
         self.category      = tk.StringVar(value=settings.get("category", "Utility"))
 
         self._build_ui()
+        self._freeze_width()
+
+    def _freeze_width(self):
+        """Pin the window to a width wide enough for the longest Step-1 label
+        (the "Linux native executable" option, in either language) so switching
+        between the three executable-type options never grows or shrinks the
+        window — only a manual resize by the user changes it afterwards.
+        """
+        # Measure with a real, temporarily-packed Label rather than raw font.measure:
+        # the actual widget's own padding/borderwidth add a few pixels that a plain
+        # text measurement misses, and those pixels are exactly what got clipped.
+        sonda = tk.Label(self.root, font=("Arial", 10, "bold"))
+        largura_texto = 0
+        for lang in ("en", "pt"):
+            for key in ("step1_wine", "step1_native", "step1_appimage"):
+                sonda.config(text=self.texts[lang][key])
+                sonda.update_idletasks()
+                largura_texto = max(largura_texto, sonda.winfo_reqwidth())
+        sonda.destroy()
+
+        self.root.update_idletasks()
+        # +40 = the label's own pack padx=20 on each side; +12 extra safety margin.
+        largura = max(self.root.winfo_reqwidth(), largura_texto + 40 + 12)
+        altura = self.root.winfo_reqheight()
+        self.root.geometry(f"{largura}x{altura}")
+        self.root.minsize(largura, 0)
+        # Freeze automatic resizing from content changes (radio selection, language,
+        # theme); the window only changes size again if the user drags its edge.
+        self.root.pack_propagate(False)
 
     # ── Theme helpers ─────────────────────────────────────────────────────────
     def _apply_palette(self):
@@ -397,7 +427,7 @@ class LinuxShortcutMaker:
 
     def _load_settings(self):
         """Load saved settings (theme + language + last browsed path + category) from config_sh.ini."""
-        defaults = {"theme": "dark", "language": "en", "last_path": "", "category": "Utility"}
+        defaults = {"theme": "dark", "language": "en", "last_path": "", "category": "Utility", "exe_type": "wine"}
         try:
             if self.config_file.exists():
                 parser = configparser.ConfigParser()
@@ -407,13 +437,17 @@ class LinuxShortcutMaker:
                 language = section.get("language", defaults["language"])
                 last_path = section.get("last_path", defaults["last_path"])
                 category = section.get("category", defaults["category"])
+                exe_type = section.get("exe_type", defaults["exe_type"])
                 if theme not in THEMES:
                     theme = defaults["theme"]
                 if language not in ("en", "pt"):
                     language = defaults["language"]
                 if category not in self.VALID_CATEGORIES:
                     category = defaults["category"]
-                return {"theme": theme, "language": language, "last_path": last_path, "category": category}
+                if exe_type not in ("wine", "native", "appimage"):
+                    exe_type = defaults["exe_type"]
+                return {"theme": theme, "language": language, "last_path": last_path,
+                        "category": category, "exe_type": exe_type}
         except Exception:
             pass
         return defaults
@@ -430,6 +464,7 @@ class LinuxShortcutMaker:
             current["theme"] = self.current_theme
             current["language"] = self.lang
             current["category"] = self.category.get()
+            current["exe_type"] = self.exe_type.get()
             current.update(updates)
             parser = configparser.ConfigParser()
             parser["settings"] = current
@@ -646,7 +681,9 @@ class LinuxShortcutMaker:
         self.frame_icone = tk.Frame(self.root, bg=self.bg_color)
         self.frame_icone.pack(fill="x", padx=20, pady=5)
 
-        self.lbl_icone = tk.Label(self.frame_icone, text=self.texts[self.lang]["default_icon"],
+        _icone_inicial = self.texts[self.lang]["default_icon"] if self.exe_type.get() == "wine" \
+            else self.texts[self.lang]["default_icon_native"]
+        self.lbl_icone = tk.Label(self.frame_icone, text=_icone_inicial,
                                   fg=self.color_gray, bg=self.bg_color, justify="left", anchor="w")
         self.lbl_icone.pack(side="left", expand=True, fill="x")
         self.lbl_icone.bind("<Configure>", lambda e: self.lbl_icone.config(wraplength=e.width - 4))
@@ -732,6 +769,7 @@ class LinuxShortcutMaker:
     def on_type_change(self):
         t = self.texts[self.lang]
         is_wine = self.exe_type.get() == "wine"
+        self._save_settings()
 
         # Show detection label in orange to signal manual override
         self.lbl_step1.config(
